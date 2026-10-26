@@ -38,14 +38,17 @@ page. No separate frontend deploy.
 Payload shape: `{ repo, branch, task, source, requestedBy }`. `/run` clones the
 repo and spawns `claude -p` in the background, returns 200 immediately.
 
-### D5. Git credentials are fetched at `/run`, not baked into the image
+### D5. Git credentials never reach the agent
 Rejected: SSH key in the Dockerfile. It would live in image layers, snapshot,
 and S3 zip, be shared by every VM, need a rebuild to rotate, and be readable
 by a prompt-injected agent with workspace-wide blast radius.
-Instead: secret in Secrets Manager, fetched via execution role in `/run`,
-written to tmpfs mode 600. Prefer HTTPS + git credential helper over SSH so
-the per-repo future (Bitbucket Repository Access Tokens, GitHub App
-installation tokens) is a change to the fetch step only.
+Instead: token in Secrets Manager, fetched via execution role in `/run` by the
+root worker process. The worker writes it to the agent's git credential store
+only for the clone and the final push, and deletes it in between. Claude Code
+runs with no credentials on disk; the prompt tells it to commit and not push.
+The worker pushes `agent/<id>` after Claude exits (only if there are new
+commits). Per-repo future: Bitbucket Repository Access Tokens or GitHub App
+installation tokens are a change to the fetch step only.
 
 ### D6. Commits are authored by a bot identity, humans go in trailers
 Rejected: author commits as the triggering human. Misleading audit trail,
@@ -117,10 +120,23 @@ needs show up as a log line, not as a broken run.
 - Sandbox mounts a fresh `/dev` per Bash command, so anything placed in
   `/dev/shm` by the worker is invisible to git inside Claude Code. Git
   credentials live in `/home/agent/.git-credentials` (mode 600) instead.
-- Image ships Node 18 (AL2023 default `nodejs`). Claude Code runs, but the AWS
-  SDK drops Node 18 in early 2027. Switch to `nodejs22` on the next rebuild.
+- AL2023 default `nodejs` is 18. Image uses `nodejs24` + `nodejs24-npm`
+  (24.21 at time of writing), the newest line in the AL2023 repos.
 - A trivial task (write one file, commit) took ~10 s of agent time and ~$0.07.
-- Claude Code adds its own `Co-Authored-By: Claude ...` trailer by default.
+- Commit trailers: `attribution.commit` in the baked settings is `""` (no
+  `Co-Authored-By`), and the worker passes `--settings` per run with
+  `attribution.commit` = `Requested-by: ...` + `Source: ...`, so Claude Code
+  appends them itself instead of the prompt asking the model to.
+- Marketplace: the Sonnet/Haiku agreements were created once by the exec role
+  during run 2; the permission was then removed from the role. A new model
+  family needs a one-time agreement from a principal that has
+  `aws-marketplace:ViewSubscriptions` + `Subscribe`.
+- Sandbox read-only noise seen when git ran inside Claude Code's Bash:
+  `.git/config` is a sandbox protected path even inside the writable cwd (so
+  `git push -u` cannot record upstream); `$HOME` is read-only inside the
+  sandbox (so the credential store cannot take its `.lock`); a `stat` of a
+  missing `.gitmodules` returns EACCES instead of ENOENT. All cosmetic, and all
+  gone now that the worker does the push outside the sandbox.
 
 ## Open questions
 

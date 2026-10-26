@@ -53,13 +53,19 @@ the payload is optional; empty means the default branch (looked up via API).
 The PAT therefore needs Contents and Pull requests write. Per-repo future: Bitbucket Repository Access Tokens or GitHub App
 installation tokens are a change to the fetch step only.
 
-### D6. Commits are authored by a bot identity, humans go in trailers
-Rejected: author commits as the triggering human. Misleading audit trail,
-breaks signing, human gets blamed for code they never saw.
-Instead: author/committer = bot. Trailers `Requested-by:` and `Jira:` carry
-the human and ticket. Human identity drives PR assignee/reviewer, Jira
-transitions, and notifications. If compliance needs a human author, git
-separates author from committer, so that is a config flip later.
+### D6. Commits: author = requesting human, committer = bot, Claude co-author
+Revised 2026-10-26 at Hunter's direction (originally: bot author, human in a
+trailer). Git already separates author from committer, so the commit records
+all three truthfully: `user.name`/`user.email` in the clone are set from
+`requestedBy`, `GIT_COMMITTER_*` is the `cloud-agent` identity, and Claude
+Code's default `Co-Authored-By: Claude <model>` trailer stays on. GitHub
+renders this as "hskrasek and claude committed". The author email must be a
+verified email on the human's GitHub account for the avatar/link to resolve.
+Falls back to the bot as author when `requestedBy` is absent (e.g. a webhook
+with no assignee). `Requested-by`/`Source` live in the PR body, not commit
+trailers. Trade-off accepted: blame points at the human, who is also the PR
+reviewer/owner, so the audit trail is "asked for and owns" rather than
+"typed".
 
 ### D7. One HTTP control plane, thin clients
 Control plane = one Lambda event function with function URL + a table keyed by
@@ -126,10 +132,9 @@ needs show up as a log line, not as a broken run.
 - AL2023 default `nodejs` is 18. Image uses `nodejs24` + `nodejs24-npm`
   (24.21 at time of writing), the newest line in the AL2023 repos.
 - A trivial task (write one file, commit) took ~10 s of agent time and ~$0.07.
-- Commit trailers: `attribution.commit` in the baked settings is `""` (no
-  `Co-Authored-By`), and the worker passes `--settings` per run with
-  `attribution.commit` = `Requested-by: ...` + `Source: ...`, so Claude Code
-  appends them itself instead of the prompt asking the model to.
+- Commit identity is set by the worker (repo-local `user.*` for author,
+  `GIT_COMMITTER_*` env for committer); Claude Code's default attribution
+  adds the `Co-Authored-By` trailer. See D6.
 - Marketplace: the Sonnet/Haiku agreements were created once by the exec role
   during run 2; the permission was then removed from the role. A new model
   family needs a one-time agreement from a principal that has

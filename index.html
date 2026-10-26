@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloud Agent</title>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --dim: #777; --line: #e3e3e3; --hl: #eef6ff; --hlb: #3b82f6; --err: #b91c1c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111; --fg: #e6e6e6; --dim: #8a8a8a; --line: #2a2a2a; --hl: #0f2238; --hlb: #60a5fa; --err: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+  header { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 12px; align-items: center; }
+  header b { flex: 1; }
+  #status { color: var(--dim); font-size: 13px; }
+  button { font: inherit; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer; }
+  main { padding: 12px 16px 60px; max-width: 900px; margin: 0 auto; }
+  .msg { margin: 8px 0; white-space: pre-wrap; word-break: break-word; }
+  .dim { color: var(--dim); font-size: 13px; font-family: ui-monospace, Menlo, monospace; }
+  .result { background: var(--hl); border-left: 3px solid var(--hlb); padding: 10px 12px; border-radius: 4px; }
+  .err { color: var(--err); }
+  details summary { color: var(--dim); font-size: 13px; cursor: pointer; }
+  pre { font-size: 12px; overflow-x: auto; margin: 4px 0 0; }
+  #resume { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: none; }
+</style>
+</head>
+<body>
+<header><b>Cloud Agent</b><span id="status">connecting</span><button id="load">Load log</button></header>
+<main id="log"></main>
+<button id="resume">Jump to latest</button>
+<script>
+(() => {
+  const token = new URLSearchParams(location.hash.slice(1)).get('token') || '';
+  const log = document.getElementById('log');
+  const status = document.getElementById('status');
+  const resume = document.getElementById('resume');
+  let follow = true;
+
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const trunc = (s, n = 160) => s.length > n ? s.slice(0, n) + '…' : s;
+  const raw = (obj, label) => {
+    const d = el('details', 'msg');
+    d.appendChild(el('summary', null, label));
+    d.appendChild(el('pre', 'dim', JSON.stringify(obj, null, 2)));
+    return d;
+  };
+
+  function render(line) {
+    let m;
+    try { m = JSON.parse(line); } catch { return el('div', 'msg dim', line); }
+    if (m.type === 'assistant' && m.message && Array.isArray(m.message.content)) {
+      const frag = document.createDocumentFragment();
+      for (const c of m.message.content) {
+        if (c.type === 'text') frag.appendChild(el('div', 'msg', c.text));
+        else if (c.type === 'tool_use') frag.appendChild(el('div', 'msg dim', '▸ ' + c.name + ' ' + trunc(JSON.stringify(c.input))));
+        else frag.appendChild(raw(c, c.type));
+      }
+      return frag;
+    }
+    if (m.type === 'user' && m.message && Array.isArray(m.message.content)) {
+      const frag = document.createDocumentFragment();
+      for (const c of m.message.content) {
+        if (c.type === 'tool_result') {
+          const t = typeof c.content === 'string' ? c.content : (c.content || []).map(x => x.text || '').join('\n');
+          frag.appendChild(el('div', 'msg dim' + (c.is_error ? ' err' : ''), '  ↳ ' + trunc(t, 300)));
+        } else frag.appendChild(raw(c, c.type));
+      }
+      return frag;
+    }
+    if (m.type === 'result') {
+      const d = el('div', 'msg result');
+      d.appendChild(el('div', 'dim', 'result · ' + (m.subtype || '') + (m.duration_ms ? ' · ' + Math.round(m.duration_ms / 1000) + 's' : '') + (m.total_cost_usd != null ? ' · $' + m.total_cost_usd.toFixed(3) : '')));
+      d.appendChild(el('div', null, m.result || ''));
+      return d;
+    }
+    if (m.type === 'system') return el('div', 'msg dim', 'system · ' + (m.subtype || '') + (m.model ? ' · ' + m.model : ''));
+    return raw(m, m.type || 'unknown');
+  }
+
+  function append(line) {
+    if (!line.trim()) return;
+    log.appendChild(render(line));
+    if (follow) window.scrollTo(0, document.body.scrollHeight);
+  }
+
+  window.addEventListener('scroll', () => {
+    const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 40;
+    follow = atBottom;
+    resume.style.display = atBottom ? 'none' : 'block';
+  });
+  resume.onclick = () => { follow = true; window.scrollTo(0, document.body.scrollHeight); };
+
+  document.getElementById('load').onclick = async () => {
+    status.textContent = 'loading log';
+    try {
+      const r = await fetch('/log', { headers: { 'X-aws-proxy-auth': token } });
+      log.replaceChildren();
+      (await r.text()).split('\n').forEach(append);
+      status.textContent = r.ok ? 'log loaded' : 'log ' + r.status;
+    } catch (e) { status.textContent = 'log failed: ' + e.message; }
+  };
+
+  function connect() {
+    const ws = new WebSocket(location.origin.replace(/^http/, 'ws') + '/stream',
+      ['lambda-microvms', 'lambda-microvms.authentication.' + token, 'lambda-microvms.port.8080']);
+    ws.onopen = () => { status.textContent = 'live'; };
+    ws.onmessage = e => String(e.data).split('\n').forEach(append);
+    ws.onclose = () => { status.textContent = 'disconnected'; };
+    ws.onerror = () => { status.textContent = 'stream error'; };
+  }
+  connect();
+})();
+</script>
+</body>
+</html>

@@ -47,7 +47,10 @@ root worker process. The worker writes it to the agent's git credential store
 only for the clone and the final push, and deletes it in between. Claude Code
 runs with no credentials on disk; the prompt tells it to commit and not push.
 The worker pushes `agent/<id>` after Claude exits (only if there are new
-commits). Per-repo future: Bitbucket Repository Access Tokens or GitHub App
+commits) and opens a PR against the repo's default branch via the GitHub
+REST API, body = task + the agent's final summary + trailers. `branch` in
+the payload is optional; empty means the default branch (looked up via API).
+The PAT therefore needs Contents and Pull requests write. Per-repo future: Bitbucket Repository Access Tokens or GitHub App
 installation tokens are a change to the fetch step only.
 
 ### D6. Commits are authored by a bot identity, humans go in trailers

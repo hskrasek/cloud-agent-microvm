@@ -120,14 +120,27 @@ const REPO_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(\.git)?$/;
 const REF_NAME = /^[\w./-]+$/;
 
 async function runJob(job) {
-  const { repo, branch = "main", task, source = "unknown", requestedBy = "" } = job;
+  const { repo, task, source = "unknown", requestedBy = "" } = job;
   if (!REPO_URL.test(repo)) throw new Error("repo must be an https://github.com/<owner>/<name> URL");
+  const token = await githubToken();
+
+  // GitHub REST, scoped to this repo. Node 24 has fetch built in.
+  const [owner, name] = new URL(repo).pathname.replace(/\.git$/, "").split("/").filter(Boolean);
+  const gh = async (path, init = {}) => {
+    const r = await fetch(`https://api.github.com/repos/${owner}/${name}${path}`, {
+      ...init,
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "cloud-agent", ...init.headers },
+    });
+    if (!r.ok) throw new Error(`GitHub ${init.method || "GET"} ${path}: ${r.status} ${(await r.text()).slice(0, 200)}`);
+    return r.json();
+  };
+
+  const branch = job.branch || (await gh("")).default_branch;
   if (!REF_NAME.test(branch) || branch.startsWith("-")) throw new Error("invalid branch name");
   emit({ type: "worker", event: "start", repo, branch, source, requestedBy });
 
   // The token lives only in this root process and the env of the git
   // commands it runs. The agent uid never sees it.
-  const token = await githubToken();
   const gitRoot = (args, env = {}) => run("git", args, { asRoot: true, env: { ...gitEnv(token), ...env } });
   const git = (...a) => run("git", a, { cwd: REPO_DIR });
 
@@ -159,13 +172,18 @@ async function runJob(job) {
   const settings = JSON.stringify({ attribution: { commit: trailers, pr: "", sessionUrl: false } });
 
   emit({ type: "worker", event: "claude_start", branch: workBranch });
+  let summary = "";
   const r = await run(
     "claude",
     ["-p", prompt, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--settings", settings],
     {
       cwd: REPO_DIR,
       onLine: (line) => {
-        try { emit(JSON.parse(line)); } catch { emit({ type: "raw", line }); }
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === "result" && typeof msg.result === "string") summary = msg.result;
+          emit(msg);
+        } catch { emit({ type: "raw", line }); }
       },
     },
   );
@@ -178,13 +196,31 @@ async function runJob(job) {
   const ahead = await gitRoot(["-C", bare, "rev-list", "--count", `${branch}..${workBranch}`]);
   const commits = Number(ahead.stdout.trim()) || 0;
   let pushed = false;
+  let pr = null;
   if (commits > 0) {
     const push = await gitRoot(["-C", bare, "push", "--", repo, `${workBranch}:refs/heads/${workBranch}`]);
     pushed = push.code === 0;
     if (!pushed) emit({ type: "worker", event: "error", message: `git push exited ${push.code}` });
   }
+  if (pushed) {
+    const title = (await gitRoot(["-C", bare, "log", "-1", "--format=%s", workBranch])).stdout.trim() || `Agent: ${task.slice(0, 60)}`;
+    const body = [
+      "## Task", "", task, "",
+      "## Agent summary", "", summary || "_none_", "",
+      "---",
+      requestedBy && `Requested-by: ${requestedBy}`,
+      `Source: ${source}`,
+    ].filter((x) => x !== undefined && x !== false).join("\n");
+    try {
+      const created = await gh("/pulls", { method: "POST", body: JSON.stringify({ title, head: workBranch, base: branch, body }) });
+      pr = created.html_url;
+      emit({ type: "worker", event: "pr", url: pr });
+    } catch (err) {
+      emit({ type: "worker", event: "error", message: String(err.message || err) });
+    }
+  }
   fs.rmSync(bare, { recursive: true, force: true });
-  emit({ type: "worker", event: "done", exitCode: r.code, branch: workBranch, commits, pushed });
+  emit({ type: "worker", event: "done", exitCode: r.code, branch: workBranch, commits, pushed, pr });
   // ponytail: no self-terminate; idlePolicy or stop.sh reclaims the VM. Add
   // TerminateMicrovm here (needs lambda:TerminateMicrovm on the exec role) when
   // the 30-minute idle tail starts costing real money.

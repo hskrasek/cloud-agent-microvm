@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 REPO=${1:?usage: $0 <repo-https-url> "<task text>" [branch]}
 TASK=${2:?usage: $0 <repo-https-url> "<task text>" [branch]}
-BRANCH=${3:-main}
+BRANCH=${3:-}  # empty = repo default branch
 
 REGION=us-east-2
 NAME=cloud-agent

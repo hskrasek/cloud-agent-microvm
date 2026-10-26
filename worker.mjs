@@ -135,14 +135,18 @@ async function runJob(job) {
     `You are working in a clone of ${repo} on branch ${workBranch} (based on ${branch}).`,
     "When done, commit your changes with a concise imperative message and push the",
     `branch with: git push -u origin ${workBranch}`,
-    requestedBy ? `End every commit message with the trailer: Requested-by: ${requestedBy}` : "",
-    source ? `Also add the trailer: Source: ${source}` : "",
   ].join("\n");
+
+  // Trailers come from Claude Code's attribution setting, not the prompt, so
+  // the model cannot forget or reword them. Replaces the default Co-Authored-By.
+  const trailers = [requestedBy && `Requested-by: ${requestedBy}`, source && `Source: ${source}`]
+    .filter(Boolean).join("\n");
+  const settings = JSON.stringify({ attribution: { commit: trailers, pr: "", sessionUrl: false } });
 
   emit({ type: "worker", event: "claude_start", branch: workBranch });
   const r = await runAs(
     "claude",
-    ["-p", prompt, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
+    ["-p", prompt, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--settings", settings],
     {
       cwd: REPO_DIR,
       onLine: (line) => {

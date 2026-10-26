@@ -14,5 +14,10 @@
       ]
     },
     "enableWeakerNestedSandbox": true
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
   }
 }

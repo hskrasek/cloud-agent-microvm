@@ -1,0 +1,18 @@
+{
+  "model": "us.anthropic.claude-sonnet-5-5",
+  "env": {
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "api.github.com",
+        "registry.npmjs.org"
+      ]
+    },
+    "enableWeakerNestedSandbox": true
+  }
+}

@@ -29,9 +29,7 @@ const OUT = process.env.SESSION_OUTPUTS || "/mnt/session/outputs";
 const LOG = path.join(OUT, "stream.jsonl");
 const REPO_DIR = "/workspace/repo";
 const AGENT = { uid: 1000, gid: 1000, home: "/home/agent" }; // ponytail: uid fixed by useradd in Dockerfile
-// ponytail: in $HOME, not /dev/shm. The Claude Code sandbox (bwrap) mounts a fresh
-// /dev per command, so /dev/shm is empty inside Bash. Mode 600, deleted after the job.
-const CREDS = `${AGENT.home}/.git-credentials`;
+const CREDS = `${AGENT.home}/.git-credentials`; // exists only during clone and push
 const BOT = { name: "cloud-agent", email: "cloud-agent@users.noreply.github.com" };
 
 const here = path.dirname(new URL(import.meta.url).pathname);
@@ -106,10 +104,15 @@ async function runJob(job) {
   const { repo, branch = "main", task, source = "unknown", requestedBy = "" } = job;
   emit({ type: "worker", event: "start", repo, branch, source, requestedBy });
 
-  // Credentials: store-helper file in tmpfs, readable only by agent.
+  // The token lives only in this (root) process. It is written to the agent's
+  // credential store just for clone and push, and removed before Claude runs,
+  // so a prompt-injected agent has nothing to exfiltrate.
   const token = await githubToken();
-  fs.writeFileSync(CREDS, `https://x-access-token:${token}@github.com\n`, { mode: 0o600 });
-  fs.chownSync(CREDS, AGENT.uid, AGENT.gid);
+  const withCreds = async (fn) => {
+    fs.writeFileSync(CREDS, `https://x-access-token:${token}@github.com\n`, { mode: 0o600 });
+    fs.chownSync(CREDS, AGENT.uid, AGENT.gid);
+    try { return await fn(); } finally { fs.rmSync(CREDS, { force: true }); }
+  };
 
   const git = (...a) => runAs("git", a, { cwd: fs.existsSync(REPO_DIR) ? REPO_DIR : "/workspace" });
   for (const [k, v] of [
@@ -122,7 +125,7 @@ async function runJob(job) {
   }
 
   emit({ type: "worker", event: "clone" });
-  const clone = await git("clone", "--depth", "50", "--branch", branch, repo, REPO_DIR);
+  const clone = await withCreds(() => git("clone", "--depth", "50", "--branch", branch, repo, REPO_DIR));
   if (clone.code !== 0) throw new Error(`git clone exited ${clone.code}`);
 
   const workBranch = `agent/${Date.now().toString(36)}`;
@@ -133,8 +136,8 @@ async function runJob(job) {
     "",
     "---",
     `You are working in a clone of ${repo} on branch ${workBranch} (based on ${branch}).`,
-    "When done, commit your changes with a concise imperative message and push the",
-    `branch with: git push -u origin ${workBranch}`,
+    "When done, commit your changes with a concise imperative message.",
+    "Do not push and do not change remotes; the branch is pushed for you after you finish.",
   ].join("\n");
 
   // Trailers come from Claude Code's attribution setting, not the prompt, so
@@ -154,7 +157,18 @@ async function runJob(job) {
       },
     },
   );
-  emit({ type: "worker", event: "done", exitCode: r.code, branch: workBranch });
+  emit({ type: "worker", event: "claude_done", exitCode: r.code });
+
+  // Push whatever the agent committed. Runs outside the sandbox as `agent`.
+  const ahead = await git("rev-list", "--count", `origin/${branch}..HEAD`);
+  const commits = Number(ahead.stdout.trim()) || 0;
+  let pushed = false;
+  if (commits > 0) {
+    const push = await withCreds(() => git("push", "-u", "origin", workBranch));
+    pushed = push.code === 0;
+    if (!pushed) emit({ type: "worker", event: "error", message: `git push exited ${push.code}` });
+  }
+  emit({ type: "worker", event: "done", exitCode: r.code, branch: workBranch, commits, pushed });
   // ponytail: no self-terminate; idlePolicy or stop.sh reclaims the VM. Add
   // TerminateMicrovm here (needs lambda:TerminateMicrovm on the exec role) when
   // the 30-minute idle tail starts costing real money.
@@ -167,8 +181,6 @@ function ackThenRun(res, job) {
   runJob(job).catch((err) => {
     console.error("worker: job failed", err);
     emit({ type: "worker", event: "error", message: String(err?.message || err) });
-  }).finally(() => {
-    try { fs.rmSync(CREDS, { force: true }); } catch {}
   });
 }
 

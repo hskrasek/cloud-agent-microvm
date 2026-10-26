@@ -67,6 +67,8 @@ function agentEnv(extra = {}) {
     CLAUDE_CODE_USE_BEDROCK: "1",
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     GIT_TERMINAL_PROMPT: "0",
+    GIT_COMMITTER_NAME: BOT.name,
+    GIT_COMMITTER_EMAIL: BOT.email,
     ...extra,
   };
 }
@@ -148,7 +150,11 @@ async function runJob(job) {
   const clone = await gitRoot(["clone", "--depth", "50", "--branch", branch, "--", repo, REPO_DIR]);
   if (clone.code !== 0) throw new Error(`git clone exited ${clone.code}`);
   await run("chown", ["-R", `${AGENT.uid}:${AGENT.gid}`, "--", REPO_DIR], { asRoot: true });
-  for (const [k, v] of [["user.name", BOT.name], ["user.email", BOT.email]]) {
+  // Author = the human who asked for the work; committer = the bot (env above).
+  // Claude Code adds its own Co-Authored-By trailer, so GitHub shows both.
+  const m = /^(.*?)\s*<([^>]+)>$/.exec(requestedBy || "");
+  const author = m ? { name: m[1] || BOT.name, email: m[2] } : BOT;
+  for (const [k, v] of [["user.name", author.name], ["user.email", author.email]]) {
     const r = await git("config", k, v);
     if (r.code !== 0) throw new Error(`git config ${k} failed`);
   }
@@ -165,17 +171,11 @@ async function runJob(job) {
     "Do not push and do not change remotes; the branch is pushed for you after you finish.",
   ].join("\n");
 
-  // Trailers come from Claude Code's attribution setting, not the prompt, so
-  // the model cannot forget or reword them. Replaces the default Co-Authored-By.
-  const trailers = [requestedBy && `Requested-by: ${requestedBy}`, source && `Source: ${source}`]
-    .filter(Boolean).join("\n");
-  const settings = JSON.stringify({ attribution: { commit: trailers, pr: "", sessionUrl: false } });
-
   emit({ type: "worker", event: "claude_start", branch: workBranch });
   let summary = "";
   const r = await run(
     "claude",
-    ["-p", prompt, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--settings", settings],
+    ["-p", prompt, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
     {
       cwd: REPO_DIR,
       onLine: (line) => {

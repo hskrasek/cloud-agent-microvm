@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "aws-lambda-microvms": {
+      "source": "aws/agent-toolkit-for-aws",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "skills/specialized-skills/serverless-skills/aws-lambda-microvms/SKILL.md",
+      "computedHash": "7a73c7a15dba270713127647d0db62ceb0910c1f1846cec4b85c1dba58c5c947"
+    }
+  }
+}

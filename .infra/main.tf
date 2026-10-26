@@ -127,12 +127,6 @@ data "aws_iam_policy_document" "exec" {
     resources = ["*"]
   }
 
-  # First invoke of a model auto-creates the AWS Marketplace agreement.
-  statement {
-    actions   = ["aws-marketplace:ViewSubscriptions", "aws-marketplace:Subscribe"]
-    resources = ["*"]
-  }
-
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
     resources = [aws_secretsmanager_secret.github_token.arn]

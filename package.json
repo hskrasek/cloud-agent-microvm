@@ -1,0 +1,11 @@
+{
+  "name": "cloud-agent-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1156.0",
+    "ws": "^8.22.0"
+  }
+}

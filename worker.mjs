@@ -101,11 +101,13 @@ async function githubToken() {
 // neutralised because the agent controls that repo's contents.
 function gitEnv(token) {
   const cfg = [
-    ["safe.directory", "*"],
+    ["safe.directory", REPO_DIR],
+    ["safe.directory", `${REPO_DIR}/.git`],
     ["core.hooksPath", "/dev/null"],
     ["credential.helper", ""],
     ["http.proxy", ""],
-    ["http.extraHeader", `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`],
+    // URL-scoped: the header is only ever sent to github.com.
+    ["http.https://github.com/.extraHeader", `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`],
   ];
   const env = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_COUNT: String(cfg.length) };
   cfg.forEach(([k, v], i) => { env[`GIT_CONFIG_KEY_${i}`] = k; env[`GIT_CONFIG_VALUE_${i}`] = v; });
@@ -114,8 +116,13 @@ function gitEnv(token) {
 
 // ---- the job ---------------------------------------------------------------
 
+const REPO_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(\.git)?$/;
+const REF_NAME = /^[\w./-]+$/;
+
 async function runJob(job) {
   const { repo, branch = "main", task, source = "unknown", requestedBy = "" } = job;
+  if (!REPO_URL.test(repo)) throw new Error("repo must be an https://github.com/<owner>/<name> URL");
+  if (!REF_NAME.test(branch) || branch.startsWith("-")) throw new Error("invalid branch name");
   emit({ type: "worker", event: "start", repo, branch, source, requestedBy });
 
   // The token lives only in this root process and the env of the git
@@ -125,9 +132,9 @@ async function runJob(job) {
   const git = (...a) => run("git", a, { cwd: REPO_DIR });
 
   emit({ type: "worker", event: "clone" });
-  const clone = await gitRoot(["clone", "--depth", "50", "--branch", branch, repo, REPO_DIR]);
+  const clone = await gitRoot(["clone", "--depth", "50", "--branch", branch, "--", repo, REPO_DIR]);
   if (clone.code !== 0) throw new Error(`git clone exited ${clone.code}`);
-  await run("chown", ["-R", `${AGENT.uid}:${AGENT.gid}`, REPO_DIR], { asRoot: true });
+  await run("chown", ["-R", `${AGENT.uid}:${AGENT.gid}`, "--", REPO_DIR], { asRoot: true });
   for (const [k, v] of [["user.name", BOT.name], ["user.email", BOT.email]]) {
     const r = await git("config", k, v);
     if (r.code !== 0) throw new Error(`git config ${k} failed`);
@@ -167,12 +174,12 @@ async function runJob(job) {
   // Push from a fresh root-owned bare clone so nothing the agent left in
   // /workspace/repo (config, hooks, background processes) touches the push.
   const bare = fs.mkdtempSync("/root/push-");
-  await gitRoot(["clone", "--bare", "--quiet", REPO_DIR, bare]);
+  await gitRoot(["clone", "--bare", "--quiet", "--", REPO_DIR, bare]);
   const ahead = await gitRoot(["-C", bare, "rev-list", "--count", `${branch}..${workBranch}`]);
   const commits = Number(ahead.stdout.trim()) || 0;
   let pushed = false;
   if (commits > 0) {
-    const push = await gitRoot(["-C", bare, "push", repo, `${workBranch}:refs/heads/${workBranch}`]);
+    const push = await gitRoot(["-C", bare, "push", "--", repo, `${workBranch}:refs/heads/${workBranch}`]);
     pushed = push.code === 0;
     if (!pushed) emit({ type: "worker", event: "error", message: `git push exited ${push.code}` });
   }

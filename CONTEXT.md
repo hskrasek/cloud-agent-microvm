@@ -145,6 +145,13 @@ needs show up as a log line, not as a broken run.
   sandbox (so the credential store cannot take its `.lock`); a `stat` of a
   missing `.gitmodules` returns EACCES instead of ENOENT. All cosmetic, and all
   gone now that the worker does the push outside the sandbox.
+- Shell ingress is a raw PTY over the WebSocket: the server sends one JSON
+  greeting (`{"type":"session_init",...}`) then plain bytes both ways. Use
+  `websocat -b` with the local terminal in `stty raw -echo`; line mode works
+  for pasted commands but not for interactive use. You land as root on a pts;
+  the image has no `ps`, and root needs `-c safe.directory=/workspace/repo`
+  to read the agent-owned clone. Suspend takes ~3 s, resume ~1 s, and the
+  filesystem survives the round trip. `demo.sh` strings all of this together.
 
 ## Open questions
 
@@ -184,10 +191,3 @@ Fixed names so infra, scripts, image, and worker.mjs agree. Change here first.
   key `cloud-agent-microvm/terraform.tfstate`. Image creation and runs are
   done by scripts via the CLI, not Tofu (no provider resource for
   lambda-microvms yet).
-- Shell ingress is a raw PTY over the WebSocket: the server sends one JSON
-  greeting (`{"type":"session_init",...}`) then plain bytes both ways. Use
-  `websocat -b` with the local terminal in `stty raw -echo`; line mode works
-  for pasted commands but not for interactive use. You land as root on a pts;
-  the image has no `ps`, and root needs `-c safe.directory=/workspace/repo`
-  to read the agent-owned clone. Suspend takes ~3 s, resume ~1 s, and the
-  filesystem survives the round trip. `demo.sh` strings all of this together.

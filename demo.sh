@@ -44,7 +44,7 @@ pause
 
 step "3. Shell: the human escape hatch (D8), separate 15-min token, root in the same container"
 echo "  try: git -C /workspace/repo -c safe.directory=/workspace/repo log --format='%an | %cn | %s' -3"
-echo "       for p in \$(grep -l '^Uid:.1000' /proc/[0-9]*/status); do cat \${p%status}comm; done  # what the agent left running"
+echo "       ps -u agent -o pid,ppid,comm   # what the agent left running"
 echo "       ls /root; tail -2 /mnt/session/outputs/stream.jsonl"
 pause; shell
 

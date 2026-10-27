@@ -152,6 +152,12 @@ needs show up as a log line, not as a broken run.
   the image has no `ps`, and root needs `-c safe.directory=/workspace/repo`
   to read the agent-owned clone. Suspend takes ~3 s, resume ~1 s, and the
   filesystem survives the round trip. `demo.sh` strings all of this together.
+- After a job, `ps -u agent` shows one `socat <defunct>` reparented to PID 1.
+  Claude Code's sandbox spawns socat for its network proxy; the worker (node,
+  PID 1) does not reap orphans, so the zombie stays. It holds no memory or
+  file descriptors, so it is cosmetic. Fix if it ever matters: run the worker
+  under a minimal init (`tini`/`dumb-init`) or have the worker reap on
+  SIGCHLD. `procps-ng` is in the image as of v9.0 so `ps` works in the shell.
 
 ## Open questions
 

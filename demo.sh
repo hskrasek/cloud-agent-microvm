@@ -38,7 +38,7 @@ trap 'echo; echo "cleaning up $ID"; ./stop.sh "$ID" >/dev/null' EXIT
 step "2. Watch: live stream in the browser"
 open "$VIEWER"
 echo "  waiting for the worker's done event..."
-until grep -q '"event":"done"' <<<"$(curl -s "$ENDPOINT/log" -H "X-aws-proxy-auth: $TOKEN")"; do sleep 2; done
+until grep -q '^{"type":"worker","event":"done"' <<<"$(curl -s "$ENDPOINT/log" -H "X-aws-proxy-auth: $TOKEN")"; do sleep 2; done
 curl -s "$ENDPOINT/log" -H "X-aws-proxy-auth: $TOKEN" | grep -E '"event":"(pr|done)"'
 pause
 
@@ -60,7 +60,9 @@ wait_state RUNNING
 pause; shell
 
 step "6. Result: the PR on GitHub (author = you, committer = bot, Claude co-author)"
-PR=$(curl -s "$ENDPOINT/log" -H "X-aws-proxy-auth: $TOKEN" | sed -n 's/.*"event":"pr","url":"\([^"]*\)".*/\1/p' | tail -1)
+# The log also carries model output, so only trust a worker line with a GitHub PR URL.
+PR=$(curl -s "$ENDPOINT/log" -H "X-aws-proxy-auth: $TOKEN" \
+  | sed -n 's#^{"type":"worker","event":"pr","url":"\(https://github\.com/[A-Za-z0-9_.-]*/[A-Za-z0-9_.-]*/pull/[0-9]*\)"}$#\1#p' | tail -1)
 [[ -n "$PR" ]] && open "$PR" || echo "  no PR event (agent made no commits?)"
 pause
 

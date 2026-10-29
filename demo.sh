@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Paced demo: run a task, watch it, shell in, suspend/resume, show the PR, stop.
 # Usage: ./demo.sh [repo-https-url] ["task text"]
+#        ./demo.sh --prestarted <microvm-id>   # attach to a VM run.sh already launched (skips step 1)
 set -euo pipefail
 cd "$(dirname "$0")"
 
+PRESTARTED=; [[ ${1:-} == --prestarted ]] && { PRESTARTED=${2:?microvm id}; shift 2; }
 REPO=${1:-https://github.com/hskrasek/hunterskrasek.com}
 TASK=${2:-"Add a CODE_OF_CONDUCT.md based on the Contributor Covenant, under 60 lines, and commit it"}
 REGION=us-east-2
@@ -25,14 +27,25 @@ shell() {
   stty sane; echo
 }
 
-step "1. Launch: task + repo go in, nothing else leaves the laptop"
-echo "  repo: $REPO"
-echo "  task: $TASK"
-OUT=$(./run.sh "$REPO" "$TASK" | tee /dev/stderr)
-ID=$(sed -n 's/^microvm: *//p' <<<"$OUT")
-VIEWER=$(sed -n 's/^viewer: *//p' <<<"$OUT")
-ENDPOINT=${VIEWER%%/#token=*}
-TOKEN=${VIEWER##*#token=}
+if [[ -n $PRESTARTED ]]; then
+  step "1. (prestarted) attaching to $PRESTARTED"
+  ID=$PRESTARTED
+  ENDPOINT=$(aws lambda-microvms get-microvm --region "$REGION" --microvm-identifier "$ID" --query endpoint --output text)
+  [[ "$ENDPOINT" == https://* ]] || ENDPOINT="https://${ENDPOINT}"
+  TOKEN=$(aws lambda-microvms create-microvm-auth-token --region "$REGION" \
+    --microvm-identifier "$ID" --expiration-in-minutes 60 \
+    --allowed-ports '[{"port":8080}]' --query 'authToken."X-aws-proxy-auth"' --output text)
+  VIEWER="${ENDPOINT}/#token=${TOKEN}"
+else
+  step "1. Launch: task + repo go in, nothing else leaves the laptop"
+  echo "  repo: $REPO"
+  echo "  task: $TASK"
+  OUT=$(./run.sh "$REPO" "$TASK" | tee /dev/stderr)
+  ID=$(sed -n 's/^microvm: *//p' <<<"$OUT")
+  VIEWER=$(sed -n 's/^viewer: *//p' <<<"$OUT")
+  ENDPOINT=${VIEWER%%/#token=*}
+  TOKEN=${VIEWER##*#token=}
+fi
 trap 'echo; echo "cleaning up $ID"; ./stop.sh "$ID" >/dev/null' EXIT
 
 step "2. Watch: live stream in the browser"

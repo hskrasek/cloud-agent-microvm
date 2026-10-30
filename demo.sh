@@ -35,16 +35,16 @@ if [[ -n $PRESTARTED ]]; then
   TOKEN=$(aws lambda-microvms create-microvm-auth-token --region "$REGION" \
     --microvm-identifier "$ID" --expiration-in-minutes 60 \
     --allowed-ports '[{"port":8080}]' --query 'authToken."X-aws-proxy-auth"' --output text)
-  VIEWER="${ENDPOINT}/#token=${TOKEN}"
+  VIEWER="file://${PWD}/index.html#host=${ENDPOINT#https://}&token=${TOKEN}"
 else
   step "1. Launch: task + repo go in, nothing else leaves the laptop"
   echo "  repo: $REPO"
   echo "  task: $TASK"
   OUT=$(./run.sh "$REPO" "$TASK" | tee /dev/stderr)
   ID=$(sed -n 's/^microvm: *//p' <<<"$OUT")
+  ENDPOINT=$(sed -n 's/^endpoint: *//p' <<<"$OUT")
   VIEWER=$(sed -n 's/^viewer: *//p' <<<"$OUT")
-  ENDPOINT=${VIEWER%%/#token=*}
-  TOKEN=${VIEWER##*#token=}
+  TOKEN=${VIEWER##*token=}
 fi
 trap 'echo; echo "cleaning up $ID"; ./stop.sh "$ID" >/dev/null' EXIT
 

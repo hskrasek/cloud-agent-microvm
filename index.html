@@ -26,12 +26,16 @@
 </style>
 </head>
 <body>
-<header><b>Cloud Agent</b><span id="status">connecting</span><button id="load">Load log</button></header>
+<header><b>Cloud Agent</b><span id="status">connecting</span></header>
 <main id="log"></main>
 <button id="resume">Jump to latest</button>
 <script>
 (() => {
-  const token = new URLSearchParams(location.hash.slice(1)).get('token') || '';
+  // Opened from disk: the proxy only takes the token as a header or WS subprotocol,
+  // so a browser can't load this page from the VM itself. Host + token come in the fragment.
+  const frag = new URLSearchParams(location.hash.slice(1));
+  const token = frag.get('token') || '';
+  const host = frag.get('host') || location.host;
   const log = document.getElementById('log');
   const status = document.getElementById('status');
   const resume = document.getElementById('resume');
@@ -91,18 +95,8 @@
   });
   resume.onclick = () => { follow = true; window.scrollTo(0, document.body.scrollHeight); };
 
-  document.getElementById('load').onclick = async () => {
-    status.textContent = 'loading log';
-    try {
-      const r = await fetch('/log', { headers: { 'X-aws-proxy-auth': token } });
-      log.replaceChildren();
-      (await r.text()).split('\n').forEach(append);
-      status.textContent = r.ok ? 'log loaded' : 'log ' + r.status;
-    } catch (e) { status.textContent = 'log failed: ' + e.message; }
-  };
-
   function connect() {
-    const ws = new WebSocket(location.origin.replace(/^http/, 'ws') + '/stream',
+    const ws = new WebSocket('wss://' + host + '/stream',
       ['lambda-microvms', 'lambda-microvms.authentication.' + token, 'lambda-microvms.port.8080']);
     ws.onopen = () => { status.textContent = 'live'; };
     ws.onmessage = e => String(e.data).split('\n').forEach(append);

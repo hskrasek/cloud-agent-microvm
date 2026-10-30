@@ -152,6 +152,12 @@ needs show up as a log line, not as a broken run.
   the image has no `ps`, and root needs `-c safe.directory=/workspace/repo`
   to read the agent-owned clone. Suspend takes ~3 s, resume ~1 s, and the
   filesystem survives the round trip. `demo.sh` strings all of this together.
+- The proxy accepts the auth token only as the `X-aws-proxy-auth` header or
+  a WebSocket subprotocol. A browser navigation can send neither, so the
+  viewer cannot be served from the VM ("Request missing authentication").
+  `index.html` is opened from disk instead and connects over `wss://` with
+  the host and token in the URL fragment; the worker's `/stream` replays the
+  backlog so no HTTP fetch is needed. `/log` stays for curl.
 - After a job, `ps -u agent` shows one `socat <defunct>` reparented to PID 1.
   Claude Code's sandbox spawns socat for its network proxy; the worker (node,
   PID 1) does not reap orphans, so the zombie stays. It holds no memory or

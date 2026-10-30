@@ -55,7 +55,8 @@ TOKEN=$(aws lambda-microvms create-microvm-auth-token --region "$REGION" \
 cat <<EOF
 
 microvm:  ${ID}
-viewer:   ${ENDPOINT}/#token=${TOKEN}
+endpoint: ${ENDPOINT}
+viewer:   file://${PWD}/index.html#host=${ENDPOINT#https://}&token=${TOKEN}
 log:      curl -s "${ENDPOINT}/log" -H "X-aws-proxy-auth: ${TOKEN}"
 
 shell:

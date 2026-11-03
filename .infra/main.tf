@@ -1,8 +1,8 @@
 terraform {
   required_version = ">= 1.8"
 
+  # bucket comes from backend.hcl (gitignored): tofu init -backend-config=backend.hcl
   backend "s3" {
-    bucket = "tofu-state-<account-id>-us-east-2"
     key    = "cloud-agent-microvm/terraform.tfstate"
     region = "us-east-2"
   }
@@ -19,8 +19,10 @@ provider "aws" {
   region = "us-east-2"
 }
 
+data "aws_caller_identity" "current" {}
+
 locals {
-  account = "<account-id>"
+  account = data.aws_caller_identity.current.account_id
   region  = "us-east-2"
 }
 

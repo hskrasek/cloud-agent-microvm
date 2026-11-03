@@ -173,7 +173,7 @@ needs show up as a log line, not as a broken run.
 
 Fixed names so infra, scripts, image, and worker.mjs agree. Change here first.
 
-- Region `us-east-2`, account `<account-id>`. Managed base image
+- Region `us-east-2`, account `<account-id>` (resolved via `aws_caller_identity`). Managed base image
   `arn:aws:lambda:us-east-2:aws:microvm-image:al2023-1`.
 - Image name `cloud-agent`. Artifact bucket
   `cloud-agent-microvm-artifacts-<account-id>-us-east-2`, key `cloud-agent.zip`.
@@ -199,7 +199,8 @@ Fixed names so infra, scripts, image, and worker.mjs agree. Change here first.
   aws-samples/sample-lambda-microvm-claude-managed-agents worker.mjs.
 - Files in repo root: `Dockerfile`, `worker.mjs`, `package.json`, `index.html`,
   `settings.json`, `deploy.sh`, `run.sh`, `.infra/` (OpenTofu).
-- OpenTofu state in existing bucket `tofu-state-<account-id>-us-east-2`,
+- OpenTofu state in existing bucket `tofu-state-<account-id>-us-east-2`
+  (name kept out of git in `.infra/backend.hcl`; init with `-backend-config=backend.hcl`),
   key `cloud-agent-microvm/terraform.tfstate`. Image creation and runs are
   done by scripts via the CLI, not Tofu (no provider resource for
   lambda-microvms yet).

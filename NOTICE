@@ -1,0 +1,8 @@
+This project is licensed under the MIT License (see LICENSE).
+
+Third-party content:
+
+- .agents/skills/aws-lambda-microvms/ is copied from
+  https://github.com/aws/agent-toolkit-for-aws (Apache License 2.0).
+  The upstream license applies to that directory. See skills-lock.json
+  for the pinned source path and content hash.
